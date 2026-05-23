@@ -6,6 +6,7 @@ import {
   listModels, pickBestModel, pickTextModel, chatStream,
   extractCode, sanitizeCode, stripCodeBlocks, wrapWithEmail,
 } from './services/ollamaService';
+import { buildBarChart, buildLineChart } from './services/chartTemplates';
 
 const SYSTEM_PROMPT = `You are a React UI component generator. Generate beautiful, interactive React components.
 
@@ -83,37 +84,6 @@ const PRESET_PROMPTS: Record<'bar' | 'line', string> = {
 4. ライトな背景でモダンなデザイン`,
 };
 
-// Chart-only prompts used in dual-model mode (email is generated separately and injected via wrapWithEmail)
-const CHART_ONLY_PROMPTS: Record<'bar' | 'line', string> = {
-  bar: `年間消費電力比較の縦棒グラフReactコンポーネントを作成して。
-
-データ: 旧型2,383kWh / 新型1,922kWh / 電力単価31円 / 節約461kWh / 節約金額14,291円
-
-要件:
-- SVGのviewBox="0 0 560 240"を使った縦棒グラフ（rect要素）。
-- 棒の高さの計算（必ずこの方法で）: const chartH = 160; const baseline = 200; const maxVal = 2600;
-  旧型: const oldH = (2383/maxVal)*chartH; → y={baseline - oldH} height={oldH}
-  新型: const newH = (1922/maxVal)*chartH; → y={baseline - newH} height={newH}
-  height は必ず正の値。絶対に負の値や height={-barH} を使わない。
-- 旧型=#f43f5e、新型=#06b6d4。Y軸グリッド線・kWhラベル・X軸ラベルあり。
-- 下部に「旧型年間電力量」「新型年間電力量」「年間節約額」の統計カード3枚。
-- ライトな背景でモダンなデザイン。`,
-
-  line: `年間消費電力比較の折れ線グラフReactコンポーネントを作成して。
-
-データ: 旧型1,390kWh / 新型1,032kWh / 電力単価31円 / 節約358kWh / 節約金額11,098円
-月別kWh — 旧型: [92,85,95,100,108,120,148,155,130,108,92,157] / 新型: [68,63,70,74,80,89,110,115,96,80,68,119]
-
-要件:
-- SVGのviewBox="0 0 560 240"の折れ線グラフ。
-- x座標は左右に余白を設けること: const padL=40; const padR=20; const usableW=560-padL-padR;
-  const oldPts = oldData.map((v,i)=>({x: padL + i*(usableW/11), y: baseline-(v/maxV)*chartH}));
-  ※ x = padL + i*(usableW/11) を使うと全点がpadL〜540の範囲に収まる。
-- 旧型=#f43f5e、新型=#06b6d4。fill領域: const fillPts=[...oldPts,...[...newPts].reverse()].map(p=>p.x+','+p.y).join(' ')
-- データ点circleあり、Y軸グリッド線・kWhラベル・X軸月ラベルあり。
-- 下部に「旧型年間電力量」「新型年間電力量」「年間節約額」の統計カード3枚。
-- ライトな背景でモダンなデザイン。`,
-};
 
 function makeMsg(sender: 'user' | 'ai', text: string): Message {
   return {
@@ -211,7 +181,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const runDualModelGeneration = async (emailPrompt: string, chartPrompt: string, presetType: 'bar' | 'line') => {
+  const runDualModelGeneration = async (emailPrompt: string, presetType: 'bar' | 'line') => {
     setIsGenerating(true);
     setStreamingText('');
     setGeneratedCode('');
@@ -237,17 +207,16 @@ export const App: React.FC = () => {
       setStreamingText('');
       setMessages(prev => [...prev, makeMsg('ai', '✅ メール文章の生成が完了しました。グラフコードを生成します...')]);
 
-      // Stage 2: グラフのみをコードモデルで生成（メールは wrapWithEmail で後から確実に組み込む）
-      let fullCode = '';
-      await chatStream(ollamaModel, SYSTEM_PROMPT, chartPrompt, (cumulative) => {
-        fullCode = cumulative;
-        setStreamingText(cumulative);
-      });
-
-      const description = stripCodeBlocks(fullCode) || 'コンポーネントを生成しました。';
-      const rawCode = extractCode(fullCode);
-      setStreamingText('');
-      setMessages(prev => [...prev, makeMsg('ai', description)]);
+      // Stage 2: テンプレートからグラフコードを即時生成（LLM呼び出しなし）
+      setMessages(prev => [...prev, makeMsg('ai', '📊 グラフテンプレートを適用中...')]);
+      const rawCode = presetType === 'bar'
+        ? buildBarChart({ oldKwh: 2383, newKwh: 1922, unitPrice: 31, savingsKwh: 461, savingsYen: 14291, roomSize: '20畳' })
+        : buildLineChart({
+            oldKwh: 1390, newKwh: 1032, unitPrice: 31, savingsKwh: 358, savingsYen: 11098, roomSize: '12畳',
+            oldMonthly: [92, 85, 95, 100, 108, 120, 148, 155, 130, 108, 92, 157],
+            newMonthly: [68, 63, 70, 74, 80, 89, 110, 115, 96, 80, 68, 119],
+          });
+      setMessages(prev => [...prev, makeMsg('ai', 'グラフテンプレートを適用しました。')]);
       setIsGenerating(false);
 
       setIsCompiling(true);
@@ -281,7 +250,7 @@ export const App: React.FC = () => {
       : 'あなたは、家電量販店の販売促進スタッフで、過去にエアコン購入された顧客に、Eメールで新エアコンの案内をして、新型は、年間消費電力を節約できることアピールして、店舗に来店して購買するメールのドラフトを作成してます。 エアコンの12畳型の旧型は、1,390kWhの年間消費電力量、新型は、1,032kWhの年間消費電力量で、電力単価は31円です。年間消費電力比較の線グラフを表示した、メール案内文をドラフトして';
     setMessages(prev => [...prev, makeMsg('user', userText)]);
     if (ollamaTextModel && ollamaTextModel !== ollamaModel) {
-      runDualModelGeneration(EMAIL_PROMPTS[id], CHART_ONLY_PROMPTS[id], id);
+      runDualModelGeneration(EMAIL_PROMPTS[id], id);
     } else {
       runGeneration(PRESET_PROMPTS[id], id);
     }
