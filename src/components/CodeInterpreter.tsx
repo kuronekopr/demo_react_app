@@ -19,6 +19,7 @@ function buildIframeHtml(code: string): string {
     *, *::before, *::after { box-sizing: border-box; }
     body { margin: 0; padding: 20px; font-family: Inter, system-ui, sans-serif;
            background: #f8fafc; color: #1e293b; min-height: 100vh; }
+    svg { overflow: visible; max-width: 100%; }
   </style>
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>

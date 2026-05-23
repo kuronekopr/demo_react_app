@@ -14,6 +14,7 @@ interface ChatWindowProps {
   streamingText: string;
   ollamaStatus: 'checking' | 'online' | 'offline';
   ollamaModel: string;
+  ollamaTextModel?: string;
   onSendMessage: (text: string) => void;
   onSelectPreset: (presetId: 'bar' | 'line') => void;
 }
@@ -24,6 +25,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   streamingText,
   ollamaStatus,
   ollamaModel,
+  ollamaTextModel,
   onSendMessage,
   onSelectPreset,
 }) => {
@@ -42,12 +44,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   const presetDemos = [
-    { id: 'bar', title: 'エアコンの20畳型の旧45,000円、新33,000円の年間消費電力比較のグラフを表示して。' },
-    { id: 'line', title: 'エアコンの20畳型の旧45,000円、新33,000円の年間消費電力比較の5年間の推移を線グラフで表示して。' },
+    { id: 'bar', title: 'あなたは、家電量販店の販売促進スタッフで、過去にエアコン購入された顧客に、Eメールで新エアコンの案内をして、新型は、年間消費電力を節約できることアピールして、店舗に来店して購買するメールのドラフトを作成してます。 エアコンの20畳型の旧型は、2,383kWhの年間消費電力量、新型は、1,922kWhの年間消費電力量で、電力単価は31円です。年間消費電力比較の棒グラフを表示した、メール案内文をドラフトして' },
+    { id: 'line', title: 'あなたは、家電量販店の販売促進スタッフで、過去にエアコン購入された顧客に、Eメールで新エアコンの案内をして、新型は、年間消費電力を節約できることアピールして、店舗に来店して購買するメールのドラフトを作成してます。 エアコンの12畳型の旧型は、1,390kWhの年間消費電力量、新型は、1,032kWhの年間消費電力量で、電力単価は31円です。年間消費電力比較の線グラフを表示した、メール案内文をドラフトして' },
   ] as const;
 
   const statusColor = ollamaStatus === 'online' ? 'hsl(var(--emerald))' : ollamaStatus === 'offline' ? 'hsl(var(--rose))' : 'hsl(var(--amber))';
-  const statusLabel = ollamaStatus === 'online' ? ollamaModel : ollamaStatus === 'offline' ? 'Offline' : '接続中...';
+  const isDualModel = ollamaTextModel && ollamaTextModel !== ollamaModel;
+  const shorten = (name: string) => name.split(':')[0];
+  const statusLabel = ollamaStatus === 'online'
+    ? (isDualModel ? `${shorten(ollamaModel)} / ${shorten(ollamaTextModel!)}` : ollamaModel)
+    : ollamaStatus === 'offline' ? 'Offline' : '接続中...';
 
   return (
     <div className="glass-panel chat-column">

@@ -3,8 +3,8 @@ import { ChatWindow } from './components/ChatWindow';
 import type { Message } from './components/ChatWindow';
 import { CodeInterpreter } from './components/CodeInterpreter';
 import {
-  listModels, pickBestModel, chatStream,
-  extractCode, sanitizeCode, stripCodeBlocks,
+  listModels, pickBestModel, pickTextModel, chatStream,
+  extractCode, sanitizeCode, stripCodeBlocks, wrapWithEmail,
 } from './services/ollamaService';
 
 const SYSTEM_PROMPT = `You are a React UI component generator. Generate beautiful, interactive React components.
@@ -18,40 +18,101 @@ STRICT CODE RULES:
 - Do NOT write any import or export statements (React, useState, useEffect, useRef etc. are already available as globals)
 - Use ONLY inline styles (style={{...}}) — no className referencing external CSS
 - Make it visually appealing with colors, rounded corners, and interactivity
+- The LAST line of code must be the closing brace of App. Do NOT write any identifier, variable name, or statement after the closing brace of App.
 
-BAR CHART LAYOUT RULES (critical — follow exactly):
-- Always use SVG for bar charts. Set viewBox="0 0 W H" and use <rect> elements for bars.
-- Calculate bar x/y/width/height as pixel values from data, never as CSS percentages.
-- Do NOT use height:X% on flex children — percentage heights in flex containers resolve to 0.`;
+CHART RULES (critical — follow exactly):
+- Always use SVG for charts. Use rect elements for bars, polyline elements for lines.
+- Calculate all x/y/width/height as pixel values from data — never use CSS height:X% on flex children.
+- SVG rect height MUST be positive. For vertical bars: const barH = (value/maxValue)*chartH; use y={baseline - barH} height={barH}. NEVER use negative height like height={-barH}.
+- Use JSX syntax THROUGHOUT — including for all SVG elements. NEVER call React.createElement() directly anywhere.
+- NEVER use .forEach() inside JSX — it returns undefined and renders nothing. Always use .map() to render element lists.
+- Precompute ALL coordinate arrays as const variables BEFORE the return statement. Keep expressions simple.
+- Keep template literal expressions simple — never add extra closing parentheses (wrong: \${fn(x))}, correct: \${fn(x)}).
+- All CSS string values inside style objects must be quoted strings, e.g. borderBottom: '2px solid #ccc'.
+- For fill area between two lines: const fillPts = [...oldPts, ...[...newPts].reverse()].map(p => p.x+','+p.y).join(' '); then use a polygon element with points={fillPts} fill="rgba(16,185,129,0.15)". Never compute fill areas with complex math or nested spreads.
+- Always leave padding inside the SVG viewBox: use padL=40, padR=20, padT=20, padB=30 and compute x/y within those bounds so no element falls outside the viewBox.
+- Always close every JSX tag. Verify the return statement's outermost div is properly closed before the closing brace of App.`;
+
+const EMAIL_SYSTEM_PROMPT = `あなたは家電量販店の販売促進担当者です。顧客への案内メールを丁寧な日本語で作成してください。
+出力ルール: 件名・本文・署名のみを出力すること。コード・マークダウン記号（**等）・説明文は一切不要。`;
+
+const EMAIL_PROMPTS: Record<'bar' | 'line', string> = {
+  bar: `エアコン20畳型の旧型（年間2,383kWh）から新型（年間1,922kWh）への買い替えを促す来店案内メールを作成してください。電力単価31円/kWh、年間節約電力461kWh、節約金額14,291円。`,
+  line: `エアコン12畳型の旧型（年間1,390kWh）から新型（年間1,032kWh）への買い替えを促す来店案内メールを作成してください。電力単価31円/kWh、年間節約電力358kWh、節約金額11,098円。`,
+};
 
 const PRESET_PROMPTS: Record<'bar' | 'line', string> = {
-  bar: `エアコン20畳型の旧モデル（購入価格45,000円）と新モデル（購入価格33,000円）の月別年間消費電力量(kWh)を比較する棒グラフコンポーネントを作成して。
+  bar: `家電量販店の販売促進スタッフとして、過去にエアコンを購入した顧客への来店促進メールのドラフトと、年間消費電力比較棒グラフを組み合わせたReactコンポーネントを作成して。
 
 データ:
-旧モデル(kWh): [280,255,155,75,55,85,195,315,225,75,115,210]
-新モデル(kWh): [168,153,93,45,33,51,117,189,135,45,69,126]
-月: 1月〜12月 / 電気代: 30円/kWh
+旧型エアコン（20畳）年間消費電力: 2,383 kWh
+新型エアコン（20畳）年間消費電力: 1,922 kWh
+電力単価: 31円/kWh
+年間節約電力: 461 kWh
+年間節約金額: 14,291円
 
 要件:
-- SVGのviewBox="0 0 760 260"を使い、<rect>要素でバーを描画すること（CSSのheight:%は使わない）
-- 旧モデル=#f43f5e、新モデル=#06b6d4の2本並び棒グラフ
-- SVG内に月ラベル（<text>）とY軸グリッド線を追加
-- 下部に「旧モデル年間合計kWh」「新モデル年間合計kWh」「年間節約額（円）」の統計カード3枚
-- ライトな背景でモダンなデザイン`,
+1. 上部にメール案内文（件名・本文・署名）を表示。顧客への丁寧な日本語で、節約メリットを強調し来店を促す内容。
+2. 下部にSVGのviewBox="0 0 560 220"を使った棒グラフ（<rect>要素で描画、CSSのheight:%は使わない）
+   - 旧型=#f43f5e、新型=#06b6d4の2本並び棒グラフ
+   - Y軸グリッド線・kWhラベル・「旧型」「新型」のX軸ラベルを追加
+3. 最下部に「旧型年間電力量」「新型年間電力量」「年間節約額」の統計カード3枚
+4. ライトな背景でモダンなデザイン`,
 
-  line: `エアコン20畳型の旧モデル（45,000円）と新モデル（33,000円）の5年間累積費用推移を折れ線グラフで作成して。
+  line: `家電量販店の販売促進スタッフとして、過去にエアコンを購入した顧客への来店促進メールのドラフトと、年間消費電力比較の折れ線グラフを組み合わせたReactコンポーネントを作成して。
 
-累積費用データ(円):
-旧モデル: [45000, 106200, 167400, 228600, 289800, 351000]
-新モデル: [33000, 69720, 106440, 143160, 179880, 216600]
-X軸ラベル: 購入時〜5年目
+データ:
+旧型エアコン（12畳）年間消費電力: 1,390 kWh
+新型エアコン（12畳）年間消費電力: 1,032 kWh
+電力単価: 31円/kWh
+年間節約電力: 358 kWh
+年間節約金額: 11,098円
+
+月別データ（12点、合計が年間値に一致）:
+旧型月別kWh: [92, 85, 95, 100, 108, 120, 148, 155, 130, 108, 92, 157]
+新型月別kWh: [68, 63, 70, 74, 80, 89, 110, 115, 96, 80, 68, 119]
 
 要件:
-- SVGで折れ線グラフ
-- 旧モデル=#f43f5e、新モデル=#06b6d4、節約エリアを薄い緑でfill
-- データ点をサークルで表示、Y軸ラベル（万円）・X軸ラベルあり
-- 下部に「旧モデル5年総費用」「新モデル5年総費用」「5年間節約総額」の統計カード3枚
-- ライトな背景でモダンなデザイン`,
+1. 上部にメール案内文（件名・本文・署名）を表示。顧客への丁寧な日本語で、節約メリットを強調し来店を促す内容。
+2. SVGのviewBox="0 0 560 220"の折れ線グラフ
+   - 上記の月別データをそのまま使いconst oldPts / newPtsを事前計算してpolylineで描画
+   - 旧型=#f43f5e、新型=#06b6d4
+   - fill領域: const fillPts = [...oldPts, ...[...newPts].reverse()].map(p => p.x+','+p.y).join(' '); でpolygonを描画
+   - データ点をcircleで表示、Y軸グリッド線・kWhラベル・X軸月ラベルあり
+3. 最下部に「旧型年間電力量」「新型年間電力量」「年間節約額」の統計カード3枚
+4. ライトな背景でモダンなデザイン`,
+};
+
+// Chart-only prompts used in dual-model mode (email is generated separately and injected via wrapWithEmail)
+const CHART_ONLY_PROMPTS: Record<'bar' | 'line', string> = {
+  bar: `年間消費電力比較の縦棒グラフReactコンポーネントを作成して。
+
+データ: 旧型2,383kWh / 新型1,922kWh / 電力単価31円 / 節約461kWh / 節約金額14,291円
+
+要件:
+- SVGのviewBox="0 0 560 240"を使った縦棒グラフ（rect要素）。
+- 棒の高さの計算（必ずこの方法で）: const chartH = 160; const baseline = 200; const maxVal = 2600;
+  旧型: const oldH = (2383/maxVal)*chartH; → y={baseline - oldH} height={oldH}
+  新型: const newH = (1922/maxVal)*chartH; → y={baseline - newH} height={newH}
+  height は必ず正の値。絶対に負の値や height={-barH} を使わない。
+- 旧型=#f43f5e、新型=#06b6d4。Y軸グリッド線・kWhラベル・X軸ラベルあり。
+- 下部に「旧型年間電力量」「新型年間電力量」「年間節約額」の統計カード3枚。
+- ライトな背景でモダンなデザイン。`,
+
+  line: `年間消費電力比較の折れ線グラフReactコンポーネントを作成して。
+
+データ: 旧型1,390kWh / 新型1,032kWh / 電力単価31円 / 節約358kWh / 節約金額11,098円
+月別kWh — 旧型: [92,85,95,100,108,120,148,155,130,108,92,157] / 新型: [68,63,70,74,80,89,110,115,96,80,68,119]
+
+要件:
+- SVGのviewBox="0 0 560 240"の折れ線グラフ。
+- x座標は左右に余白を設けること: const padL=40; const padR=20; const usableW=560-padL-padR;
+  const oldPts = oldData.map((v,i)=>({x: padL + i*(usableW/11), y: baseline-(v/maxV)*chartH}));
+  ※ x = padL + i*(usableW/11) を使うと全点がpadL〜540の範囲に収まる。
+- 旧型=#f43f5e、新型=#06b6d4。fill領域: const fillPts=[...oldPts,...[...newPts].reverse()].map(p=>p.x+','+p.y).join(' ')
+- データ点circleあり、Y軸グリッド線・kWhラベル・X軸月ラベルあり。
+- 下部に「旧型年間電力量」「新型年間電力量」「年間節約額」の統計カード3枚。
+- ライトな背景でモダンなデザイン。`,
 };
 
 function makeMsg(sender: 'user' | 'ai', text: string): Message {
@@ -73,6 +134,7 @@ export const App: React.FC = () => {
   const [streamingText, setStreamingText] = useState('');
   const [generatedCode, setGeneratedCode] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
+  const [ollamaTextModel, setOllamaTextModel] = useState('');
   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'online' | 'offline'>('checking');
 
   useEffect(() => {
@@ -80,10 +142,14 @@ export const App: React.FC = () => {
       try {
         const models = await listModels();
         const best = pickBestModel(models);
+        const textBest = pickTextModel(models, best);
         setOllamaModel(best);
+        setOllamaTextModel(textBest);
         setOllamaStatus('online');
         setMessages(prev => [...prev, makeMsg('ai',
-          `Ollama に接続しました。モデル「${best}」を使用します。プロンプトを選択してください。`
+          textBest !== best
+            ? `Ollama に接続しました。コード生成「${best}」／メール生成「${textBest}」の2モデル構成で動作します。プロンプトを選択してください。`
+            : `Ollama に接続しました。モデル「${best}」を使用します。プロンプトを選択してください。`
         )]);
       } catch {
         setOllamaStatus('offline');
@@ -145,6 +211,60 @@ export const App: React.FC = () => {
     }
   };
 
+  const runDualModelGeneration = async (emailPrompt: string, chartPrompt: string, presetType: 'bar' | 'line') => {
+    setIsGenerating(true);
+    setStreamingText('');
+    setGeneratedCode('');
+
+    if (ollamaStatus === 'offline' || !ollamaModel) {
+      setTimeout(() => {
+        setMessages(prev => [...prev, makeMsg('ai', '（デモモード）')]);
+        setIsGenerating(false);
+        setIsCompiling(true);
+        setTimeout(() => { setIsCompiling(false); setPresetId(presetType); }, 1200);
+      }, 900);
+      return;
+    }
+
+    try {
+      // Stage 1: メール文章をテキストモデルで生成
+      setMessages(prev => [...prev, makeMsg('ai', `📧 ${ollamaTextModel} でメール文章を生成中...`)]);
+      let emailText = '';
+      await chatStream(ollamaTextModel, EMAIL_SYSTEM_PROMPT, emailPrompt, (cumulative) => {
+        emailText = cumulative;
+        setStreamingText(cumulative);
+      });
+      setStreamingText('');
+      setMessages(prev => [...prev, makeMsg('ai', '✅ メール文章の生成が完了しました。グラフコードを生成します...')]);
+
+      // Stage 2: グラフのみをコードモデルで生成（メールは wrapWithEmail で後から確実に組み込む）
+      let fullCode = '';
+      await chatStream(ollamaModel, SYSTEM_PROMPT, chartPrompt, (cumulative) => {
+        fullCode = cumulative;
+        setStreamingText(cumulative);
+      });
+
+      const description = stripCodeBlocks(fullCode) || 'コンポーネントを生成しました。';
+      const rawCode = extractCode(fullCode);
+      setStreamingText('');
+      setMessages(prev => [...prev, makeMsg('ai', description)]);
+      setIsGenerating(false);
+
+      setIsCompiling(true);
+      setTimeout(() => {
+        setIsCompiling(false);
+        if (rawCode) setGeneratedCode(wrapWithEmail(sanitizeCode(rawCode), emailText));
+        setPresetId(presetType);
+      }, 1200);
+    } catch {
+      setStreamingText('');
+      setIsGenerating(false);
+      setMessages(prev => [...prev, makeMsg('ai', 'エラーが発生しました。デモモードで表示します。')]);
+      setIsCompiling(true);
+      setTimeout(() => { setIsCompiling(false); setPresetId(presetType); }, 800);
+    }
+  };
+
   const handleSendMessage = (text: string) => {
     setMessages(prev => [...prev, makeMsg('user', text)]);
     const lower = text.toLowerCase();
@@ -157,10 +277,14 @@ export const App: React.FC = () => {
 
   const handleSelectPreset = (id: 'bar' | 'line') => {
     const userText = id === 'bar'
-      ? 'エアコンの20畳型の旧45,000円、新33,000円の年間消費電力比較のグラフを表示して。'
-      : 'エアコンの20畳型の旧45,000円、新33,000円の年間消費電力比較の5年間の推移を線グラフで表示して。';
+      ? 'あなたは、家電量販店の販売促進スタッフで、過去にエアコン購入された顧客に、Eメールで新エアコンの案内をして、新型は、年間消費電力を節約できることアピールして、店舗に来店して購買するメールのドラフトを作成してます。 エアコンの20畳型の旧型は、2,383kWhの年間消費電力量、新型は、1,922kWhの年間消費電力量で、電力単価は31円です。年間消費電力比較の棒グラフを表示した、メール案内文をドラフトして'
+      : 'あなたは、家電量販店の販売促進スタッフで、過去にエアコン購入された顧客に、Eメールで新エアコンの案内をして、新型は、年間消費電力を節約できることアピールして、店舗に来店して購買するメールのドラフトを作成してます。 エアコンの12畳型の旧型は、1,390kWhの年間消費電力量、新型は、1,032kWhの年間消費電力量で、電力単価は31円です。年間消費電力比較の線グラフを表示した、メール案内文をドラフトして';
     setMessages(prev => [...prev, makeMsg('user', userText)]);
-    runGeneration(PRESET_PROMPTS[id], id);
+    if (ollamaTextModel && ollamaTextModel !== ollamaModel) {
+      runDualModelGeneration(EMAIL_PROMPTS[id], CHART_ONLY_PROMPTS[id], id);
+    } else {
+      runGeneration(PRESET_PROMPTS[id], id);
+    }
   };
 
   return (
@@ -171,6 +295,7 @@ export const App: React.FC = () => {
         streamingText={streamingText}
         ollamaStatus={ollamaStatus}
         ollamaModel={ollamaModel}
+        ollamaTextModel={ollamaTextModel}
         onSendMessage={handleSendMessage}
         onSelectPreset={handleSelectPreset}
       />
