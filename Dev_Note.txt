@@ -1,0 +1,17 @@
+c:\demo\reaact_appのフォルダの下にlocal環境のWeb画面で、デモが動くReactアプリを開発する。
+
+Windows11の環境に、
+
+Node.js v24.16.0
+nvm 11.13.0
+
+がインストールされている
+
+開発言語Typescript
+フロントエンドUI React
+ビルドツール Vite(v8.0.14 / create@9.0.7)
+
+の開発環境を構築したいので、
+ Vite(v8.0.14 / create@9.0.7)
+
+をインストールして
