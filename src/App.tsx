@@ -7,6 +7,35 @@ import {
   extractCode, sanitizeCode, stripCodeBlocks, wrapWithEmail,
 } from './services/ollamaService';
 import { buildBarChart, buildLineChart } from './services/chartTemplates';
+import type { BarChartData, LineChartData } from './services/chartTemplates';
+
+// Seasonal distribution ratios for air conditioner energy use (sums to 1.0)
+const SEASONAL_RATIOS = [0.0662, 0.0612, 0.0683, 0.0719, 0.0777, 0.0863, 0.1065, 0.1151, 0.0935, 0.0777, 0.0662, 0.1094];
+function distributeMonthly(annualKwh: number): number[] {
+  return SEASONAL_RATIOS.map(r => Math.round(annualKwh * r));
+}
+
+interface ParsedAcRequest {
+  oldKwh: number;
+  newKwh: number;
+  unitPrice: number;
+  roomSize: string;
+  chartType: 'bar' | 'line';
+}
+
+function parseAcRequest(text: string): ParsedAcRequest | null {
+  const oldMatch = text.match(/旧型[^。\n]*?(\d[\d,]*)\s*kWh/i);
+  const newMatch = text.match(/新型[^。\n]*?(\d[\d,]*)\s*kWh/i);
+  if (!oldMatch || !newMatch) return null;
+  const oldKwh = parseInt(oldMatch[1].replace(/,/g, ''));
+  const newKwh = parseInt(newMatch[1].replace(/,/g, ''));
+  const priceMatch = text.match(/電力単価[^\d]*(\d+)\s*円/);
+  const unitPrice = priceMatch ? parseInt(priceMatch[1]) : 31;
+  const roomMatch = text.match(/(\d+)\s*畳型?/);
+  const roomSize = roomMatch ? `${roomMatch[1]}畳` : '';
+  const chartType = (text.includes('線') || text.toLowerCase().includes('line')) ? 'line' : 'bar';
+  return { oldKwh, newKwh, unitPrice, roomSize, chartType };
+}
 
 const SYSTEM_PROMPT = `You are a React UI component generator. Generate beautiful, interactive React components.
 
@@ -140,7 +169,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const runDualModelGeneration = async (emailPrompt: string, presetType: 'bar' | 'line') => {
+  const runDualModelGeneration = async (emailPrompt: string, presetType: 'bar' | 'line', chartData?: BarChartData | LineChartData) => {
     setIsGenerating(true);
     setStreamingText('');
     setGeneratedCode('');
@@ -168,13 +197,17 @@ export const App: React.FC = () => {
 
       // Stage 2: テンプレートからグラフコードを即時生成（LLM呼び出しなし）
       setMessages(prev => [...prev, makeMsg('ai', '📊 グラフテンプレートを適用中...')]);
-      const rawCode = presetType === 'bar'
-        ? buildBarChart({ oldKwh: 2383, newKwh: 1922, unitPrice: 31, savingsKwh: 461, savingsYen: 14291, roomSize: '20畳' })
-        : buildLineChart({
-            oldKwh: 1390, newKwh: 1032, unitPrice: 31, savingsKwh: 358, savingsYen: 11098, roomSize: '12畳',
-            oldMonthly: [92, 85, 95, 100, 108, 120, 148, 155, 130, 108, 92, 157],
-            newMonthly: [68, 63, 70, 74, 80, 89, 110, 115, 96, 80, 68, 119],
-          });
+      const rawCode = chartData
+        ? (presetType === 'bar'
+            ? buildBarChart(chartData as BarChartData)
+            : buildLineChart(chartData as LineChartData))
+        : (presetType === 'bar'
+            ? buildBarChart({ oldKwh: 2383, newKwh: 1922, unitPrice: 31, savingsKwh: 461, savingsYen: 14291, roomSize: '20畳' })
+            : buildLineChart({
+                oldKwh: 1390, newKwh: 1032, unitPrice: 31, savingsKwh: 358, savingsYen: 11098, roomSize: '12畳',
+                oldMonthly: [92, 85, 95, 100, 108, 120, 148, 155, 130, 108, 92, 157],
+                newMonthly: [68, 63, 70, 74, 80, 89, 110, 115, 96, 80, 68, 119],
+              }));
       setMessages(prev => [...prev, makeMsg('ai', 'グラフテンプレートを適用しました。')]);
       setIsGenerating(false);
 
@@ -195,12 +228,25 @@ export const App: React.FC = () => {
 
   const handleSendMessage = (text: string) => {
     setMessages(prev => [...prev, makeMsg('user', text)]);
-    const lower = text.toLowerCase();
-    let preset: 'bar' | 'line' =
-      (lower.includes('線') || lower.includes('推移') || lower.includes('5年') || lower.includes('line'))
-        ? 'line' : 'bar';
-    const enriched = `${text}\n\n（エアコンのデータがある場合: 旧モデル45,000円・新モデル33,000円・20畳型）`;
-    runGeneration(enriched, preset);
+    const isEmailRequest = text.includes('メール') || text.includes('案内') || text.includes('ドラフト');
+    const parsed = isEmailRequest ? parseAcRequest(text) : null;
+
+    if (parsed) {
+      const savingsKwh = parsed.oldKwh - parsed.newKwh;
+      const savingsYen = savingsKwh * parsed.unitPrice;
+      const emailPrompt = `エアコン${parsed.roomSize}の旧型（年間${parsed.oldKwh}kWh）から新型（年間${parsed.newKwh}kWh）への買い替えを促す来店案内メールを作成してください。電力単価${parsed.unitPrice}円/kWh、年間節約電力${savingsKwh}kWh、節約金額${savingsYen.toLocaleString('ja-JP')}円。`;
+      const chartData: BarChartData | LineChartData = parsed.chartType === 'line'
+        ? { oldKwh: parsed.oldKwh, newKwh: parsed.newKwh, unitPrice: parsed.unitPrice, savingsKwh, savingsYen, roomSize: parsed.roomSize, oldMonthly: distributeMonthly(parsed.oldKwh), newMonthly: distributeMonthly(parsed.newKwh) }
+        : { oldKwh: parsed.oldKwh, newKwh: parsed.newKwh, unitPrice: parsed.unitPrice, savingsKwh, savingsYen, roomSize: parsed.roomSize };
+      runDualModelGeneration(emailPrompt, parsed.chartType, chartData);
+    } else {
+      const lower = text.toLowerCase();
+      const preset: 'bar' | 'line' =
+        (lower.includes('線') || lower.includes('推移') || lower.includes('5年') || lower.includes('line'))
+          ? 'line' : 'bar';
+      const enriched = `${text}\n\n（エアコンのデータがある場合: 旧モデル45,000円・新モデル33,000円・20畳型）`;
+      runGeneration(enriched, preset);
+    }
   };
 
   const handleSelectPreset = (id: 'bar' | 'line') => {
