@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
-import { Code, Eye, Loader2 } from 'lucide-react';
+import { Code, Eye, Loader2, Clock, Trash2, Download } from 'lucide-react';
+import type { SavedEmail } from '../App';
 
 interface CodeInterpreterProps {
   presetId: 'welcome' | 'bar' | 'line';
   isCompiling: boolean;
   generatedCode: string;
+  savedEmails: SavedEmail[];
+  onDeleteEmail: (id: string) => void;
 }
 
 // Build a self-contained HTML page that renders the generated React component
@@ -56,9 +59,22 @@ function buildIframeHtml(code: string): string {
 }
 
 export const CodeInterpreter: React.FC<CodeInterpreterProps> = ({
-  presetId, isCompiling, generatedCode,
+  presetId, isCompiling, generatedCode, savedEmails, onDeleteEmail,
 }) => {
-  const [activeTab, setActiveTab] = useState<'preview' | 'code'>('preview');
+  const [activeTab, setActiveTab] = useState<'preview' | 'code' | 'history'>('preview');
+  const [viewingCode, setViewingCode] = useState<string | null>(null);
+
+  const displayCode = viewingCode ?? generatedCode;
+
+  function downloadHtml(code: string) {
+    const html = buildIframeHtml(code);
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `email_${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}.html`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
 
   // ---- Hardcoded fallback demos ----
 
@@ -177,7 +193,7 @@ export const CodeInterpreter: React.FC<CodeInterpreterProps> = ({
       return <div key={i} className="code-line" dangerouslySetInnerHTML={{ __html: r || '&nbsp;' }} />;
     });
 
-  const codeToDisplay = generatedCode || fallbackCode[presetId] || '';
+  const codeToDisplay = displayCode || fallbackCode[presetId] || '';
 
   return (
     <div className="glass-panel preview-column">
@@ -199,13 +215,21 @@ export const CodeInterpreter: React.FC<CodeInterpreterProps> = ({
         </div>
 
         {presetId !== 'welcome' && (
-          <div className="interpreter-tabs">
+          <div className="interpreter-tabs" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <button className={`tab-btn ${activeTab === 'preview' ? 'active' : ''}`} onClick={() => setActiveTab('preview')}>
               <Eye size={14} /><span>プレビュー</span>
             </button>
             <button className={`tab-btn ${activeTab === 'code' ? 'active' : ''}`} onClick={() => setActiveTab('code')}>
               <Code size={14} /><span>コード表示</span>
             </button>
+            <button className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+              <Clock size={14} /><span>履歴 {savedEmails.length > 0 && `(${savedEmails.length})`}</span>
+            </button>
+            {displayCode && (
+              <button className="tab-btn" onClick={() => downloadHtml(displayCode)} title="HTMLとして保存">
+                <Download size={14} />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -218,23 +242,56 @@ export const CodeInterpreter: React.FC<CodeInterpreterProps> = ({
               Rendering component...
             </p>
           </div>
+        ) : activeTab === 'history' ? (
+          <div style={{ padding: '16px', overflowY: 'auto', width: '100%' }}>
+            {savedEmails.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'hsl(var(--text-muted))', paddingTop: '48px', fontSize: '13px' }}>
+                <Clock size={32} style={{ opacity: 0.3, margin: '0 auto 12px', display: 'block' }} />
+                保存されたメールはありません
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {savedEmails.map(e => (
+                  <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'hsl(var(--surface))', border: '1px solid hsl(var(--border))', borderRadius: '10px', padding: '10px 12px' }}>
+                    <button
+                      onClick={() => { setViewingCode(e.generatedCode); setActiveTab('preview'); }}
+                      style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                    >
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--text))' }}>{e.label}</div>
+                      <div style={{ fontSize: '11px', color: 'hsl(var(--text-muted))', marginTop: '2px' }}>{e.savedAt}</div>
+                    </button>
+                    <button onClick={() => onDeleteEmail(e.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--text-dim))', padding: '4px', borderRadius: '6px', display: 'flex' }} title="削除">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         ) : activeTab === 'preview' ? (
-          generatedCode ? (
-            // LLM generated code → iframe sandbox
-            <iframe
-              key={generatedCode}
-              srcDoc={buildIframeHtml(generatedCode)}
-              style={{ width: '100%', height: '100%', border: 'none', background: '#f8fafc' }}
-              sandbox="allow-scripts"
-              title="Generated React Component"
-            />
-          ) : (
-            <div className="viewport-panel">
-              {presetId === 'welcome' && <WelcomeView />}
-              {presetId === 'bar' && <BarComparisonDemo />}
-              {presetId === 'line' && <LineGraphDemo />}
-            </div>
-          )
+          <>
+            {viewingCode && (
+              <div style={{ padding: '6px 12px', background: 'hsla(var(--primary)/0.08)', borderBottom: '1px solid hsla(var(--primary)/0.2)', fontSize: '12px', color: 'hsl(var(--primary))', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>📂 履歴を表示中</span>
+                <button onClick={() => setViewingCode(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--primary))', fontSize: '12px', padding: '2px 6px' }}>現在のメールに戻る</button>
+              </div>
+            )}
+            {displayCode ? (
+              <iframe
+                key={displayCode}
+                srcDoc={buildIframeHtml(displayCode)}
+                style={{ width: '100%', height: '100%', border: 'none', background: '#f8fafc', flex: 1 }}
+                sandbox="allow-scripts"
+                title="Generated React Component"
+              />
+            ) : (
+              <div className="viewport-panel">
+                {presetId === 'welcome' && <WelcomeView />}
+                {presetId === 'bar' && <BarComparisonDemo />}
+                {presetId === 'line' && <LineGraphDemo />}
+              </div>
+            )}
+          </>
         ) : (
           <div className="code-viewer-panel">
             {renderHighlightedCode(codeToDisplay)}

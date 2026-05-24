@@ -4,10 +4,19 @@ import type { Message } from './components/ChatWindow';
 import { CodeInterpreter } from './components/CodeInterpreter';
 import {
   listModels, pickBestModel, pickTextModel, chatStream,
-  extractCode, sanitizeCode, stripCodeBlocks, wrapWithEmail,
+  extractCode, sanitizeCode, stripCodeBlocks,
+  svgToPngDataUrl, wrapWithEmailPng,
 } from './services/ollamaService';
-import { buildBarChart, buildLineChart } from './services/chartTemplates';
+import { buildBarChartSvgXml, buildLineChartSvgXml } from './services/chartTemplates';
 import type { BarChartData, LineChartData } from './services/chartTemplates';
+
+export interface SavedEmail {
+  id: string;
+  savedAt: string;
+  label: string;
+  chartType: 'bar' | 'line';
+  generatedCode: string;
+}
 
 // Seasonal distribution ratios for air conditioner energy use (sums to 1.0)
 const SEASONAL_RATIOS = [0.0662, 0.0612, 0.0683, 0.0719, 0.0777, 0.0863, 0.1065, 0.1151, 0.0935, 0.0777, 0.0662, 0.1094];
@@ -94,6 +103,33 @@ export const App: React.FC = () => {
   const [ollamaModel, setOllamaModel] = useState('');
   const [ollamaTextModel, setOllamaTextModel] = useState('');
   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [savedEmails, setSavedEmails] = useState<SavedEmail[]>(() => {
+    try { return JSON.parse(localStorage.getItem('nexus_saved_emails') ?? '[]'); } catch { return []; }
+  });
+
+  const handleSaveEmail = (code: string, chartType: 'bar' | 'line', label: string) => {
+    const entry: SavedEmail = {
+      id: `${Date.now()}-${Math.random()}`,
+      savedAt: new Date().toLocaleString('ja-JP'),
+      label,
+      chartType,
+      generatedCode: code,
+    };
+    setSavedEmails(prev => {
+      const next = [entry, ...prev];
+      try { localStorage.setItem('nexus_saved_emails', JSON.stringify(next)); }
+      catch { setMessages(p => [...p, makeMsg('ai', '⚠️ 保存容量が上限に達しました。古い履歴を削除してください。')]); }
+      return next;
+    });
+  };
+
+  const handleDeleteEmail = (id: string) => {
+    setSavedEmails(prev => {
+      const next = prev.filter(e => e.id !== id);
+      localStorage.setItem('nexus_saved_emails', JSON.stringify(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     (async () => {
@@ -195,28 +231,40 @@ export const App: React.FC = () => {
       setStreamingText('');
       setMessages(prev => [...prev, makeMsg('ai', '✅ メール文章の生成が完了しました。グラフコードを生成します...')]);
 
-      // Stage 2: テンプレートからグラフコードを即時生成（LLM呼び出しなし）
+      // Stage 2: SVG XML をテンプレートから同期生成
       setMessages(prev => [...prev, makeMsg('ai', '📊 グラフテンプレートを適用中...')]);
-      const rawCode = chartData
-        ? (presetType === 'bar'
-            ? buildBarChart(chartData as BarChartData)
-            : buildLineChart(chartData as LineChartData))
-        : (presetType === 'bar'
-            ? buildBarChart({ oldKwh: 2383, newKwh: 1922, unitPrice: 31, savingsKwh: 461, savingsYen: 14291, roomSize: '20畳' })
-            : buildLineChart({
-                oldKwh: 1390, newKwh: 1032, unitPrice: 31, savingsKwh: 358, savingsYen: 11098, roomSize: '12畳',
-                oldMonthly: [92, 85, 95, 100, 108, 120, 148, 155, 130, 108, 92, 157],
-                newMonthly: [68, 63, 70, 74, 80, 89, 110, 115, 96, 80, 68, 119],
-              }));
-      setMessages(prev => [...prev, makeMsg('ai', 'グラフテンプレートを適用しました。')]);
-      setIsGenerating(false);
+      const defaultBar = { oldKwh: 2383, newKwh: 1922, unitPrice: 31, savingsKwh: 461, savingsYen: 14291, roomSize: '20畳' };
+      const defaultLine = { oldKwh: 1390, newKwh: 1032, unitPrice: 31, savingsKwh: 358, savingsYen: 11098, roomSize: '12畳',
+        oldMonthly: [92, 85, 95, 100, 108, 120, 148, 155, 130, 108, 92, 157],
+        newMonthly: [68, 63, 70, 74, 80, 89, 110, 115, 96, 80, 68, 119] };
+      const svgXml = chartData
+        ? (presetType === 'bar' ? buildBarChartSvgXml(chartData as BarChartData) : buildLineChartSvgXml(chartData as LineChartData))
+        : (presetType === 'bar' ? buildBarChartSvgXml(defaultBar) : buildLineChartSvgXml(defaultLine));
+      const resolvedData = chartData ?? (presetType === 'bar' ? defaultBar : defaultLine);
+      const roomSize = (resolvedData as BarChartData).roomSize;
+      const label = `${roomSize} ${presetType === 'bar' ? '棒グラフ' : '折れ線グラフ'}`;
 
+      setMessages(prev => [...prev, makeMsg('ai', '🖼️ PNGに変換中...')]);
+      setIsGenerating(false);
       setIsCompiling(true);
-      setTimeout(() => {
-        setIsCompiling(false);
-        if (rawCode) setGeneratedCode(wrapWithEmail(sanitizeCode(rawCode), emailText));
+
+      // Stage 3: SVG → PNG → email JSX（非同期、最低1200msシマー保証）
+      try {
+        const [pngDataUrl] = await Promise.all([
+          svgToPngDataUrl(svgXml),
+          new Promise<void>(r => setTimeout(r, 1200)),
+        ]);
+        const finalCode = wrapWithEmailPng(pngDataUrl, emailText);
+        setGeneratedCode(finalCode);
+        handleSaveEmail(finalCode, presetType, label);
+        setMessages(prev => [...prev, makeMsg('ai', `✅ メールを生成・保存しました（${label}）`)]);
         setPresetId(presetType);
-      }, 1200);
+      } catch {
+        setMessages(prev => [...prev, makeMsg('ai', 'グラフのPNG変換に失敗しました。')]);
+        setPresetId(presetType);
+      } finally {
+        setIsCompiling(false);
+      }
     } catch {
       setStreamingText('');
       setIsGenerating(false);
@@ -273,6 +321,8 @@ export const App: React.FC = () => {
         presetId={presetId}
         isCompiling={isCompiling}
         generatedCode={generatedCode}
+        savedEmails={savedEmails}
+        onDeleteEmail={handleDeleteEmail}
       />
     </div>
   );

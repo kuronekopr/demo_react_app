@@ -106,6 +106,50 @@ export function stripCodeBlocks(text: string): string {
   return text.replace(/```[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+export function svgToPngDataUrl(svgXml: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const blob = new Blob([svgXml], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 560;
+      canvas.height = 260;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(0, 0, 560, 260);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG→PNG変換失敗')); };
+    img.src = url;
+  });
+}
+
+export function wrapWithEmailPng(pngDataUrl: string, emailText: string): string {
+  const paragraphs = emailText.split(/\n\n+/);
+  const splitIdx = Math.max(1, Math.ceil(paragraphs.length * 0.4));
+  const part1 = paragraphs.slice(0, splitIdx).join('\n\n');
+  const part2 = paragraphs.slice(splitIdx).join('\n\n');
+  const escaped1 = JSON.stringify(part1);
+  const escaped2 = JSON.stringify(part2);
+  const escapedPng = JSON.stringify(pngDataUrl);
+  const emailStyle = '{background:"#fff",border:"1px solid #e2e8f0",borderRadius:"12px",padding:"28px",whiteSpace:"pre-wrap",lineHeight:"2",fontSize:"14px",color:"#374151",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}';
+  const imgStyle = '{width:"100%",display:"block",borderRadius:"8px",margin:"24px 0"}';
+  return 'const App = () => {\n' +
+    '  const _p1 = ' + escaped1 + ';\n' +
+    '  const _p2 = ' + escaped2 + ';\n' +
+    '  const _pngSrc = ' + escapedPng + ';\n' +
+    '  return React.createElement("div",\n' +
+    '    {style:{fontFamily:"system-ui,sans-serif",maxWidth:"860px",margin:"0 auto",padding:"20px",background:"#f8fafc"}},\n' +
+    '    React.createElement("div", {style:' + emailStyle + '}, _p1),\n' +
+    '    React.createElement("img", {src:_pngSrc, style:' + imgStyle + '}),\n' +
+    '    React.createElement("div", {style:' + emailStyle + '}, _p2)\n' +
+    '  );\n' +
+    '};\n';
+}
+
 export function wrapWithEmail(chartCode: string, emailText: string): string {
   // Rename App→ChartBody so we can define a new outer App that combines email + chart.
   // Use React.createElement() (not JSX) to avoid TypeScript parsing issues in .tsx files.
