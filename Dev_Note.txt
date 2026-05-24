@@ -15,3 +15,234 @@ nvm 11.13.0
  Vite(v8.0.14 / create@9.0.7)
 
 をインストールして
+
+----------------------------------------------------------------------
+
+c\demo_react_appの開発環境をまとめて、環境情報として登録して
+
+----------------------------------------------------------------------
+
+デモアプリの開発
+
+
+左側が1/4がチャットウィンドウ、右側が3/4がチャットウィンドウの指示により生成されたReact
+CodeをCode Interpreterとしてデモ表示する画面にする
+
+上記デモ画面を構築して
+
+あなたは、家電量販店の販売促進スタッフで、過去にエアコン購入された顧客に、Eメールで新エアコンの案内をして、新型は、年間消費電力を節約できることアピールして、店舗に来店して開花するメールのドラフトを作成してます。
+エアコンの20畳型の旧型は、2,383kWhの年間消費電力量、新型は、1,922kWhの年間消費電力量で、電力単価は31円です。年間消費電力比較の棒グラフを表示した、メール案内文をドラフトして
+棒グラフの縦軸の上限を500 kWhにセットして
+
+gemma4:e4b は汎用モデルのため、複雑なReactコード生成では構文エラーが頻発します。もし qwen2.5-coder:7b や deepseek-coder:6.7b を追加でインストールできれば、同じプロンプトでも大幅に安定します。
+
+const SYSTEM_PROMPT = `You are a React UI component generator. Generate beautiful, interactive React components.
+
+STRICT OUTPUT FORMAT:
+1. Write 1-2 sentences describing what you created.
+2. Output the complete code in a single \`\`\`jsx code block.
+
+STRICT CODE RULES:
+- The main component MUST be named exactly "App"
+- Do NOT write any import or export statements (React, useState, useEffect, useRef etc. are already available as globals)
+- Use ONLY inline styles (style={{...}}) — no className referencing external CSS
+- Make it visually appealing with colors, rounded corners, and interactivity
+
+BAR CHART LAYOUT RULES (critical — follow exactly):
+- Always use SVG for bar charts. Set viewBox="0 0 W H" and use <rect> elements for bars.
+- Calculate bar x/y/width/height as pixel values from data, never as CSS percentages.
+- Do NOT use height:X% on flex children — percentage heights in flex containers resolve to 0.`;
+
+
+現状の実装のコードで、お勧めする商品を比較するグラフ作成の出力を安定化させる為、グラフのパターンをスキルとして登録したいのだけど、実装コードを調べて、スキルの作成方法を提案して
+
+Now I have a comprehensive understanding of both the chart generation code and the Claude Code skill system. Let me design the implementation approach.
+
+Key findings:
+
+Current chart generation issues: The LLM (qwen2.5-coder) generates SVG charts but has been unstable - outputting negative heights, wrong positioning, JSX/createElement mixing, etc.
+
+Skill system: Claude Code skills are stored as SKILL.md files in ~/.claude/skills/{skill-name}/SKILL.md (user-level) or .claude/skills/{skill-name}/SKILL.md (project-level).
+
+The user's intent: They want to stabilize chart output by registering chart patterns as "skills".
+
+I'm considering two approaches: either creating slash command skills like /chart-bar that generate hardcoded or template-based chart code to bypass the LLM entirely, or building LLM skills with hardcoded templates that constrain the generation process.
+
+The most effective solution would be registering pre-written, tested React chart components as skills—this way the LLM only handles the email text while the chart generation pulls from a proven template, eliminating the variability that comes from asking the model to generate chart code from scratch. I'd implement this as a Claude Code skill stored in the project with the actual React component templates ready to use.
+
+Now I'm weighing two concrete approaches: either embedding hardcoded chart templates directly in the codebase for maximum stability and speed, or creating a dedicated Claude Code skill that helps develop and manage the chart generation. The first option trades flexibility for reliability, while the second keeps things more modular and maintainable.
+
+Actually, combining both makes the most sense—storing pre-tested chart templates as reusable code patterns while also having a skill to help add new chart types as needed. The user's real goal is stabilizing graph output since the LLM keeps generating broken SVG, so the key is moving away from generating charts from scratch each time and instead substituting data into proven templates.
+
+I'd create a dedicated templates file with working React components for bar and line charts that just accept data parameters, then modify the pipeline to use these templates directly instead of asking the LLM to generate SVG. The LLM would only handle generating the email content, leaving chart creation to reliable, pre-written code.
+
+For the skill registration piece, I could set up a /chart-register command that lets developers preview new chart templates, test them with sample data, and add them to the templates file—essentially making it easy to expand the chart library without touching the core pipeline. I think they mean:
+
+The current approach asks the LLM to generate SVG charts, which is unstable
+They want to pre-define chart patterns (bar chart, line chart) as "skills" that can be reliably invoked
+The "skill" could be a Claude Code skill (/chart-bar, /chart-line) that outputs tested, hardcoded chart code, OR it could be a code-level template system
+Given the context of this project (a demo app that demonstrates LLM + React), I think the best interpretation is:
+
+Create a chart template system in code where:
+
+src/services/chartTemplates.ts exports buildBarChart(data) and buildLineChart(data) functions that return complete, pre-written React component code as strings
+The dual-model pipeline uses these templates for the chart portion (completely bypassing LLM for chart generation)
+A Claude Code project skill helps register new chart types
+I'll also create a chart-register skill that lets users define new chart types by specifying the name and data structure, then generates a tested template and adds it to the templates file. Now I'm mapping out the implementation: I need to create the template service with hardcoded, tested SVG and card layouts for each chart type, then modify the dual-model pipeline to use these templates instead of calling the LLM for chart generation. I'm realizing the user wants Claude Code skills—those slash commands that can be invoked to generate reliable chart components. The plan is to create project-level skills in the .claude/skills/ directory, where each skill provides a hardcoded React template for a specific chart type, so developers can invoke /chart-bar or similar instead of relying on the LLM to generate unstable SVG code from scratch. I'm reconsidering the approach—the user wants to register graph patterns as skills, which means the skills themselves are the stable chart patterns. I could implement this two ways: Claude Code skills that generate chart components directly, or in-app template functions that act as a reusable skill library. Since both are complementary, I'll combine them—Claude Code skills for quick chart generation during development, and in-app templates that can be updated when new patterns are tested and proven.
+
+
+IN
+Design an implementation plan to stabilize chart generation in a React demo app by registering chart patterns as Claude Code skills.
+
+## Background
+
+
+C:\Users\right\.claude\plans\playful-wobbling-stonebraker.md
+
+# チャート生成の安定化：テンプレートライブラリ＋Claude Code スキル登録
+
+## Context
+
+現状の `runDualModelGeneration` は2段階LLMパイプラインで動作している：
+- Stage 1: `gemma4:e4b` → メール本文生成（安定）
+- Stage 2: `qwen2.5-coder:7b` → SVGチャートコード生成（**不安定** — 負の height、JSX/createElement混在、ラベルオーバーフローなど多数のバグが発生）
+
+LLMにSVGをゼロから書かせるのをやめ、**事前に検証済みのテンプレート関数**からチャートコードを生成することで出力を100%安定化する。あわせて、チャートパターンをClaude Codeのプロジェクトスキル（スラッシュコマンド）として登録し、新パターンの追加・確認ができるワークフローを整える。
+
+---
+
+## 実装方針（3層構造）
+
+### Layer 1: テンプレートライブラリ（新規ファイル）
+
+**`src/services/chartTemplates.ts`** を新規作成。
+
+TypeScript関数がデータを受け取り、完全なReactコンポーネントの**コード文字列**（`sanitizeCode` / `wrapWithEmail` に渡せる形式）を返す。SVGの座標計算はすべてTypeScript側で実行し、返却する文字列にはリテラル値のみが含まれる → LLMの計算ミスが入り込む余地がゼロになる。
+
+```ts
+export interface BarChartData {
+  oldKwh: number;       // 旧型年間kWh  例: 2383
+  newKwh: number;       // 新型年間kWh  例: 1922
+  unitPrice: number;    // 円/kWh        例: 31
+  savingsKwh: number;   // 年間節約kWh  例: 461
+  savingsYen: number;   // 年間節約円   例: 14291
+  roomSize: string;     // 畳数ラベル   例: "20畳"
+}
+
+export interface LineChartData extends BarChartData {
+  oldMonthly: number[];  // 月別kWh 12点
+  newMonthly: number[];  // 月別kWh 12点
+}
+
+export function buildBarChart(data: BarChartData): string { ... }
+export function buildLineChart(data: LineChartData): string { ... }
+```
+
+**`buildBarChart` の内部ロジック:**
+- `viewBox="0 0 560 240"`, `chartH=160`, `baseline=200`
+- `maxVal = Math.ceil(data.oldKwh * 1.1 / 100) * 100`（常に正のスケール上限）
+- `oldH = (data.oldKwh / maxVal) * chartH` を TypeScript で計算 → 文字列にリテラルで埋め込む
+- `newH` も同様。**`y = baseline - barH`, `height = barH`** を確実にリテラル正値で出力
+- 旧型バー: `x=160, width=80`, 新型バー: `x=320, width=80`
+- Y軸グリッド4本 + kWhラベル、X軸ラベル、統計カード3枚
+
+**`buildLineChart` の内部ロジック:**
+- `padL=40, padR=20, padT=20, padB=30`, `usableW=500`
+- `oldPts`/`newPts` を TypeScript 側で `{x, y}[]` として全計算
+- `fillPts` 文字列も TypeScript 側で生成 → 返却コードに `.map()` 計算は一切含まれない
+- `polyline points="x1,y1 x2,y2 ..."` のリテラル文字列のみ出力
+- SVGオーバーフロー対策: 全点が `padL(40)〜540` の範囲内に収まることをTypeScript側で保証
+
+参照ソース（ビジュアルの正解パターン）:
+- `src/components/CodeInterpreter.tsx` の `BarComparisonDemo`（lines 83-116）
+- `src/components/CodeInterpreter.tsx` の `LineGraphDemo`（lines 119-157）
+
+---
+
+### Layer 2: Claude Code プロジェクトスキル（新規ファイル）
+
+`.claude/skills/` ディレクトリをプロジェクトルートに新規作成。
+
+**`.claude/skills/chart-bar/SKILL.md`**
+```yaml
+---
+name: chart-bar
+description: 棒グラフのReactコンポーネントをテンプレートから生成・確認する
+argument-hint: [oldKwh] [newKwh] [savingsKwh] [savingsYen] [unitPrice] [roomSize]
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep
+---
+```
+スキルの処理内容:
+1. 引数でデータを受け取る（省略時はデフォルト値: 2383/1922/461/14291/31/"20畳"）
+2. `buildBarChart` の呼び出しをシミュレートしてコードをプレビュー表示
+3. 承認されたら `src/components/BarChartPreview.tsx` に書き出してブラウザ確認できるようにする
+4. 新データで `chartTemplates.ts` を更新する場合の手順を案内
+
+**`.claude/skills/chart-line/SKILL.md`**  
+同様の構成。デフォルト値: 1390/1032/358/11098/31/"12畳"、月別データも含む。
+
+---
+
+### Layer 3: `src/App.tsx` の変更
+
+**変更箇所のみ（最小限の変更）:**
+
+1. **インポート追加**（line 8 付近）:
+   ```ts
+   import { buildBarChart, buildLineChart } from './services/chartTemplates';
+   ```
+
+2. **`CHART_ONLY_PROMPTS` 定数を削除**（lines 86-116: LLM用チャートプロンプト、不要になる）
+
+3. **`runDualModelGeneration` のシグネチャ変更**:
+   ```ts
+   // Before:
+   const runDualModelGeneration = async (emailPrompt: string, chartPrompt: string, presetType: 'bar' | 'line')
+   // After:
+   const runDualModelGeneration = async (emailPrompt: string, presetType: 'bar' | 'line')
+   ```
+
+4. **Stage 2 ブロックを置換**（chatStream呼び出し → テンプレート呼び出し）:
+   ```ts
+   // Before: await chatStream(ollamaModel, SYSTEM_PROMPT, chartPrompt, ...)
+   // After:
+   setMessages(prev => [...prev, makeMsg('ai', '📊 グラフテンプレートを適用中...')]);
+   const rawCode = presetType === 'bar'
+     ? buildBarChart({ oldKwh: 2383, newKwh: 1922, unitPrice: 31, savingsKwh: 461, savingsYen: 14291, roomSize: '20畳' })
+     : buildLineChart({ oldKwh: 1390, newKwh: 1032, unitPrice: 31, savingsKwh: 358, savingsYen: 11098, roomSize: '12畳',
+         oldMonthly: [92, 85, 95, 100, 108, 120, 148, 155, 130, 108, 92, 157],
+         newMonthly: [68, 63, 70, 74, 80, 89, 110, 115, 96, 80, 68, 119] });
+   setMessages(prev => [...prev, makeMsg('ai', 'グラフテンプレートを適用しました。')]);
+   setIsGenerating(false);
+   ```
+   Stage 3（`wrapWithEmail(sanitizeCode(rawCode), emailText)`）は変更不要。
+
+5. **`handleSelectPreset` の呼び出し変更**（line 284）:
+   ```ts
+   // Before: runDualModelGeneration(EMAIL_PROMPTS[id], CHART_ONLY_PROMPTS[id], id)
+   // After:  runDualModelGeneration(EMAIL_PROMPTS[id], id)
+   ```
+
+**変更しないファイル:** `ollamaService.ts`, `CodeInterpreter.tsx`, `ChatWindow.tsx`, CSS
+
+---
+
+## 修正対象ファイル一覧
+
+| ファイル | 操作 | 概要 |
+|---|---|---|
+| `src/services/chartTemplates.ts` | **新規作成** | `buildBarChart` / `buildLineChart` テンプレート関数 |
+| `src/App.tsx` | **修正** | import追加、Stage2置換、CHART_ONLY_PROMPTS削除、シグネチャ変更 |
+| `.claude/skills/chart-bar/SKILL.md` | **新規作成** | `/chart-bar` スラッシュコマンドスキル |
+| `.claude/skills/chart-line/SKILL.md` | **新規作成** | `/chart-line` スラッシュコマンドスキル |
+
+---
+
+## 検証方法
+
+1. **ビルド確認**: `npm run build` → TypeScriptエラーなし
+2. **棒グラフ動作確認**: プリセット「棒グラフ」をクリック → "📊 グラフテンプレートを適用中" が即表示 → iframeに2本の正の高さのバーが表示される（Compile Error/Runtime Errorなし）
+3. **折れ線グラフ動作確認**: プリセット「線グラフ」をクリック → 12点を繋ぐpolylineとfill polygonが表示される
+4. **スキル動作確認**: Claude Code で `/chart-bar 2500 2000 500 15500 31 20畳` を実行 → コードプレビューが表示される
+5. **オフラインモード確認**: Ollamaを止めた状態でプリセットをクリック → デモフォールバックが正常動作する
+
