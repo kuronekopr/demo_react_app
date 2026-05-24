@@ -42,47 +42,6 @@ const EMAIL_PROMPTS: Record<'bar' | 'line', string> = {
   line: `エアコン12畳型の旧型（年間1,390kWh）から新型（年間1,032kWh）への買い替えを促す来店案内メールを作成してください。電力単価31円/kWh、年間節約電力358kWh、節約金額11,098円。`,
 };
 
-const PRESET_PROMPTS: Record<'bar' | 'line', string> = {
-  bar: `家電量販店の販売促進スタッフとして、過去にエアコンを購入した顧客への来店促進メールのドラフトと、年間消費電力比較棒グラフを組み合わせたReactコンポーネントを作成して。
-
-データ:
-旧型エアコン（20畳）年間消費電力: 2,383 kWh
-新型エアコン（20畳）年間消費電力: 1,922 kWh
-電力単価: 31円/kWh
-年間節約電力: 461 kWh
-年間節約金額: 14,291円
-
-要件:
-1. 上部にメール案内文（件名・本文・署名）を表示。顧客への丁寧な日本語で、節約メリットを強調し来店を促す内容。
-2. 下部にSVGのviewBox="0 0 560 220"を使った棒グラフ（<rect>要素で描画、CSSのheight:%は使わない）
-   - 旧型=#f43f5e、新型=#06b6d4の2本並び棒グラフ
-   - Y軸グリッド線・kWhラベル・「旧型」「新型」のX軸ラベルを追加
-3. 最下部に「旧型年間電力量」「新型年間電力量」「年間節約額」の統計カード3枚
-4. ライトな背景でモダンなデザイン`,
-
-  line: `家電量販店の販売促進スタッフとして、過去にエアコンを購入した顧客への来店促進メールのドラフトと、年間消費電力比較の折れ線グラフを組み合わせたReactコンポーネントを作成して。
-
-データ:
-旧型エアコン（12畳）年間消費電力: 1,390 kWh
-新型エアコン（12畳）年間消費電力: 1,032 kWh
-電力単価: 31円/kWh
-年間節約電力: 358 kWh
-年間節約金額: 11,098円
-
-月別データ（12点、合計が年間値に一致）:
-旧型月別kWh: [92, 85, 95, 100, 108, 120, 148, 155, 130, 108, 92, 157]
-新型月別kWh: [68, 63, 70, 74, 80, 89, 110, 115, 96, 80, 68, 119]
-
-要件:
-1. 上部にメール案内文（件名・本文・署名）を表示。顧客への丁寧な日本語で、節約メリットを強調し来店を促す内容。
-2. SVGのviewBox="0 0 560 220"の折れ線グラフ
-   - 上記の月別データをそのまま使いconst oldPts / newPtsを事前計算してpolylineで描画
-   - 旧型=#f43f5e、新型=#06b6d4
-   - fill領域: const fillPts = [...oldPts, ...[...newPts].reverse()].map(p => p.x+','+p.y).join(' '); でpolygonを描画
-   - データ点をcircleで表示、Y軸グリッド線・kWhラベル・X軸月ラベルあり
-3. 最下部に「旧型年間電力量」「新型年間電力量」「年間節約額」の統計カード3枚
-4. ライトな背景でモダンなデザイン`,
-};
 
 
 function makeMsg(sender: 'user' | 'ai', text: string): Message {
@@ -96,7 +55,7 @@ function makeMsg(sender: 'user' | 'ai', text: string): Message {
 
 export const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
-    makeMsg('ai', 'こんにちは！Nexus AI Copilot です。Ollama LLM に接続してリアルタイムで React コンポーネントを生成します。下のプロンプトをクリックするか、直接指示を入力してください。'),
+    makeMsg('ai', 'こんにちは！Demo AI Replacement Proposal です。Ollama LLM に接続してリアルタイムで React コンポーネントを生成します。下のプロンプトをクリックするか、直接指示を入力してください。'),
   ]);
   const [presetId, setPresetId] = useState<'welcome' | 'bar' | 'line'>('welcome');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -249,11 +208,7 @@ export const App: React.FC = () => {
       ? 'あなたは、家電量販店の販売促進スタッフで、過去にエアコン購入された顧客に、Eメールで新エアコンの案内をして、新型は、年間消費電力を節約できることアピールして、店舗に来店して購買するメールのドラフトを作成してます。 エアコンの20畳型の旧型は、2,383kWhの年間消費電力量、新型は、1,922kWhの年間消費電力量で、電力単価は31円です。年間消費電力比較の棒グラフを表示した、メール案内文をドラフトして'
       : 'あなたは、家電量販店の販売促進スタッフで、過去にエアコン購入された顧客に、Eメールで新エアコンの案内をして、新型は、年間消費電力を節約できることアピールして、店舗に来店して購買するメールのドラフトを作成してます。 エアコンの12畳型の旧型は、1,390kWhの年間消費電力量、新型は、1,032kWhの年間消費電力量で、電力単価は31円です。年間消費電力比較の線グラフを表示した、メール案内文をドラフトして';
     setMessages(prev => [...prev, makeMsg('user', userText)]);
-    if (ollamaTextModel && ollamaTextModel !== ollamaModel) {
-      runDualModelGeneration(EMAIL_PROMPTS[id], id);
-    } else {
-      runGeneration(PRESET_PROMPTS[id], id);
-    }
+    runDualModelGeneration(EMAIL_PROMPTS[id], id);
   };
 
   return (
